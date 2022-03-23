@@ -1,0 +1,37 @@
+#################################################################################################################
+##### EasyQC-script to perform study-level and meta-level QC on imputed 1000G data
+##### EasyQC version: 9.0
+##### Programmer: Thomas Winkler, 2014-09-22
+##### Contact: thomas.winkler@klinik.uni-regensburg.de
+#################################################################################################################
+
+module load R_packages/3.6.1
+
+### Please DEFINE here format and input columns of the following EASYIN files
+
+DEFINE	--pathOut /home/nattrp/nattrp-sens2017552/6-Rscripts/EasyQC
+		--strMissing NA
+		--strSeparator TAB
+		--acolIn Chromosome;Position;Allele1;Allele2;N;Freq1;MinFreq;MaxFreq;Effect;StdErr;P.value;Direction;HetISq;HetPVal
+		--acolInClasses character;integer;character;character;numeric;numeric;numeric;numeric;numeric;numeric;numeric;character;numeric;numeric
+		--acolNewName CHR;POS;EFFECT_ALLELE;OTHER_ALLELE;N;EAF;MinFreq;MaxFreq;BETA;SE;PVAL;DIRECTION;I2;I2_PVAL
+
+
+EASYIN	--fileIn /home/nattrp/nattrp-sens2017552/6-Rscripts/EasyQC/CLEANED.UKBB.TINNITUS.HRC-1000G.EUR.130619_MF_v1.gz
+#################################################################################################################
+## EASYQC Scripting interface:
+START EASYQC
+
+## Extract top SNPs
+CRITERION	--rcdCrit PVAL<=5e-8
+			--strCritName numSNP_gws
+
+GETCOLS --acolOut CHR;POS;EFFECT_ALLELE;OTHER_ALLELE;BETA;SE;PVAL;N
+
+WRITE	--strPrefix FUMA. 
+		--strMissing NA 
+		--strMode gz
+
+STOP EASYQC
+#################################################################################################################
+#################################################################################################################
