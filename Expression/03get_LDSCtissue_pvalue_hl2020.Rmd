@@ -1,0 +1,70 @@
+---
+title: "Tissue p-value"
+author: "Shuyang Yao (shuyang.yao@ki.se)"
+date: "1/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Aim: to process raw .results files from pLDSC tissue analysis, add coefficient p-values; plot -log10(P) of tissues/cell types.  
+  
+```{r}
+library(data.table)
+library(tidyverse)
+library(stringr)
+
+# specify folder with .results files
+myfun.p <- function(a){
+files <- list.files(a,pattern="tissue_dir.results",full.names = TRUE)
+d <- data_frame(filename=files) %>% mutate(file_contents = map(filename,read_tsv)) %>%
+  mutate(Tissue=gsub(".bed_tissue_dir.results","",basename(filename)) #,
+  		 #Tissue=gsub(".bed_continuous_tissue_dir.results","",basename(filename))
+  		 ) %>% unnest() %>%
+  filter(Category=="L2_1") %>% mutate(P=1-pnorm(`Coefficient_z-score`)) %>% mutate(Trait=sub("_.*","",Tissue)) %>%
+  mutate(Tissue=gsub("^_","",str_extract(Tissue, "_.*"))) %>%
+  select(Trait,Tissue,P,Coefficient,Coefficient_std_error)
+
+write_tsv(d,path=paste(a,"/tissue_pvalues.txt", sep=""))
+
+p1 <- ggplot(d,aes(Tissue,-log10(P),fill=Tissue)) + geom_bar(stat="identity") + coord_flip() + facet_wrap(~Trait)
+p1 <- p1 + guides(fill=FALSE) + theme_bw() + geom_hline(yintercept =-log10(0.05/nrow(d))) + xlab("")
+p1 <- p1 + ylab(expression('-log'[10]*'(pvalue)'))
+#ggsave(p1,file=paste(a,"/tissue_plot.pdf", sep=""))
+
+return(p1)
+}
+
+```
+  
+## GTEx_v8  
+```{r, warning=FALSE}
+a <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03pLDSC/GTEx_v8"
+p1 <- myfun.p(a)
+p1
+```
+  
+## Zeisel  
+```{r, warning=FALSE}
+a <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03pLDSC/Zeisel"
+p1 <- myfun.p(a)
+p1
+```
+  
+## Zeisel_lvl5  
+```{r, warning=FALSE}
+a <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03pLDSC/Zeisel_lvl5"
+p1 <- myfun.p(a)
+p1
+```
+  
+## HCL  
+```{r, warning=FALSE}
+a <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03pLDSC/HCL"
+p1 <- myfun.p(a)
+p1
+```
+  
+  

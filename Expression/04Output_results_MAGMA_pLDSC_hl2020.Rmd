@@ -1,0 +1,296 @@
+---
+title: "Enrichment analysis results"
+author: "Shuyang Yao (shuyang.yao@ki.se)"
+date: "1/8/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    fig_caption: yes
+    theme: sandstone
+    highlight: haddock
+---
+<style type="text/css">
+/* Whole document: */
+body{
+  font-family: Helvetica;
+  font-size: 11pt;
+}
+/* Headers */
+h1{
+  font-size: 18pt;
+}
+h2{
+  font-size: 16pt;
+}
+h3{
+  font-size: 14pt;
+}
+h4{
+  font-size: 12pt;
+}
+</style>
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Enrichment analysis results for MDD3, in expression datasets: GTEx (version 8), Zeisel, Zeisel_lvl5, and HCL  
+Output:  
+- Data frames, separately for each expression dataset  
+- Graphs, separately for each expression dataset: x=mean($-log_{10} P$), y=tissue/cell types  
+  
+```{r}
+library(data.table)
+library(tidyverse)
+library(ggplot2)
+```
+  
+Functions:  
+1. Output table  
+```{r}
+myfun.data <- function(inpath_ldsc, inpath_magma, trait, outname_df){
+e1 <- fread(inpath_ldsc, stringsAsFactors = F, data.table = F) %>%
+  mutate(Method="LDSC")
+e1$FDR <- p.adjust(e1$P, method="fdr", n=nrow(e1) )
+
+e2 <- fread(inpath_magma, stringsAsFactors = F, data.table = F) 
+if("FULL_NAME" %in% colnames(e2)){
+  e2 <- e2 %>%
+  mutate(Trait=!!trait, Method="MAGMA") %>%
+  rename(Tissue=FULL_NAME, Coefficient=BETA, Coefficient_std_error=SE) %>%
+  select(Trait, Tissue, P, Coefficient, Coefficient_std_error, Method)
+}else{
+  e2 <- e2 %>%
+  mutate(Trait=!!trait, Method="MAGMA") %>%
+  rename(Tissue=VARIABLE, Coefficient=BETA, Coefficient_std_error=SE) %>%
+  select(Trait, Tissue, P, Coefficient, Coefficient_std_error, Method)
+}
+e2$FDR <- p.adjust(e2$P, method="fdr", n=nrow(e2) )
+
+if(expdataset=="HCL"){
+  # special for HCL: fix names:
+  e1$Tissue <- gsub("-","_", e1$Tissue)
+  e1$Tissue <- gsub("\\+","", e1$Tissue)
+  e2$Tissue <- gsub("\\.","_", e2$Tissue)
+  e2$Tissue <- gsub("__","_", e2$Tissue)
+  e2$Tissue <- gsub("AdultMuscle_Striated_muscle_a0_cell","AdultMuscle_Striated_muscle_cell", e2$Tissue)
+  e2$Tissue <- gsub("FetalEyes_M_fc_ller_glia","FetalEyes_Muller_glia", e2$Tissue)
+  e2$Tissue <- gsub("FetalMuscle_Autonomic_nervous_system_a0_","FetalMuscle_Autonomic_nervous_system", e2$Tissue)
+}
+
+# combine to get dataset
+e3 <- rbind(e1,e2) %>%
+  mutate(minuslog10P=-log10(P)) %>%
+  group_by(Tissue) %>%
+  summarise(minuslog10P_mean=mean(minuslog10P)) %>%
+  ungroup()
+e <- rbind(e1,e2) %>% left_join(e3, by="Tissue")
+if(expdataset=="HCL"){
+  e <- e %>% filter(!grepl("Unknown", Tissue))
+}
+
+# write out
+fwrite(e, outname_df, sep="\t", col.names = T)
+return(e)
+}
+
+```
+  
+2. Plot  
+```{r}
+myfun.plot <- function(e, expdataset){
+  pthresh <- 0.05/(nrow(e)/2)
+ 
+f1 <- e %>% filter(Method=="LDSC") %>% mutate(sig_ldsc=ifelse((P<=pthresh), 1, 0)) %>% select(Tissue, sig_ldsc)
+f2 <- e %>% filter(Method=="MAGMA") %>% mutate(sig_magma=ifelse((P<=pthresh), 1, 0)) %>% select(Tissue, sig_magma)
+#f <- full_join(f1, f2, by="Tissue") %>%
+f <- inner_join(f1, f2, by="Tissue") %>%
+  mutate(Significant=case_when((sig_ldsc==1 & sig_magma==1) ~ "Both",
+                               (sig_ldsc==1 & sig_magma==0) ~ "LDSC",
+                               (sig_ldsc==0 & sig_magma==1) ~ "MAGMA",
+                               (sig_ldsc==0 & sig_magma==0) ~ "None")) %>%
+  left_join(e, by="Tissue") %>%
+  distinct(Trait, Tissue, Significant, minuslog10P_mean)
+
+p <- ggplot(f,aes(Tissue,minuslog10P_mean,fill=Significant)) + 
+  geom_bar(stat="identity") + coord_flip() + facet_wrap(~Trait) 
+p <- p + theme_bw() + geom_hline(yintercept =-log10(0.05/nrow(f))) + xlab("")
+p <- p + ylab(expression('mean -log'[10]*'(pvalue)'))
+# color:
+#cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+if(length(unique(f$Significant))==4){
+  mycolor=c("#E69F00", "#56B4E9","#0072B2","#999999")
+}
+if(length(unique(f$Significant))==3){
+  mycolor=c("#E69F00", "#0072B2","#999999")
+}
+if(length(unique(f$Significant))==2){
+  mycolor=c("#E69F00", "#999999")
+}
+if(length(unique(f$Significant))==1){
+  mycolor=c("#999999")
+}
+p <- p + scale_fill_manual(values=mycolor)
+# xlab
+p_xlab <- paste("Cell types in ", expdataset, " dataset", sep="")
+p <- p + xlab(p_xlab)
+mylist <- list(f, p)
+return(mylist)
+}
+
+```
+  
+```{r}
+plot.magma.ldsc <- function(inpath_magma, inpath_ldsc, plot_out, dataset){
+  
+  df.magma <- fread(inpath_magma,
+                    stringsAsFactors = F, data.table = F) %>%
+    mutate(if.sig=ifelse(P<=0.05/nrow(df.magma), 1, 0),
+           test="MAGMA") %>%
+    select(VARIABLE, BETA, SE, P, if.sig, test)
+  tmp <- df.magma %>% arrange(-P) %>% 
+    mutate(order=row_number()) %>%
+    select(VARIABLE, order)
+  df.ldsc <- fread(inpath_ldsc,
+                    stringsAsFactors = F, data.table = F)%>%
+    rename(VARIABLE=Tissue, BETA=Coefficient, SE=Coefficient_std_error) %>%
+    mutate(if.sig=ifelse(P<=0.05/nrow(df.magma), 1, 0),
+           test="LDSC") %>%
+    select(VARIABLE, BETA, SE, P, if.sig, test)
+  d <- rbind(df.ldsc, df.magma) %>%
+    left_join(tmp, by="VARIABLE") %>%
+    group_by(VARIABLE) %>%
+    mutate(sig=ifelse(min(if.sig)==1, "red","black")) %>%
+    ungroup() 
+  a <- d %>% distinct(VARIABLE,order, sig) %>% arrange(order) %>% select(sig)
+  p1 <- ggplot(d,aes(x=reorder(VARIABLE, order), y=-log10(P),fill=test)) + 
+    geom_bar(stat="identity", width=.7, position = position_dodge(width = 0.6)) + 
+    coord_flip() + 
+    geom_hline(yintercept =-log10(0.05/nrow(df.magma))) + xlab("") +
+    ylab(expression('-log'[10]*'(pvalue)')) +
+    labs(title="Enrichment of heritability per tissue/cell type")+
+    theme(axis.text.y = element_text(color=a$sig)) + 
+    scale_fill_manual(values=c("#E69F00", "#0072B2"))
+  return(p1) 
+}
+```
+  
+Type in paths, trait, tissue etc.  
+  
+## GTEx_v8  
+```{r}
+inpath_ldsc <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03pLDSC/GTEx_v8/tissue_pvalues.txt"
+inpath_magma <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03MAGMA/GTEx_v8/hl2020.gsa.out"
+expdataset <- "GTEx_v8"
+trait <- "hl2020"
+outpath <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/04Output/"
+outname_df <- paste(outpath, expdataset, "_", trait, "_results_dataframe.tsv", sep="")
+outname_graph <- paste(outpath, expdataset,"_",  trait, "_results_graph.pdf", sep="")
+
+e <- myfun.data(inpath_ldsc, inpath_magma, trait, outname_df)
+p <- myfun.plot(e, expdataset)[[2]]
+ggsave(p,file=outname_graph)
+p
+```
+  
+## Zeisel  
+```{r}
+inpath_ldsc <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03pLDSC/Zeisel/tissue_pvalues.txt"
+inpath_magma <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03MAGMA/Zeisel/hl2020.gsa.out"
+expdataset <- "Zeisel"
+trait <- "hl2020"
+outpath <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/04Output/"
+outname_df <- paste(outpath, expdataset, "_", trait, "_results_dataframe.tsv", sep="")
+outname_graph <- paste(outpath, expdataset,"_",  trait, "_results_graph.pdf", sep="")
+
+e <- myfun.data(inpath_ldsc, inpath_magma, trait, outname_df)
+p <- myfun.plot(e, expdataset)[[2]]
+ggsave(p,file=outname_graph)
+p
+```
+  
+## Zeisel_lvl5  
+```{r}
+inpath_ldsc <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03pLDSC/Zeisel_lvl5/tissue_pvalues.txt"
+inpath_magma <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03MAGMA/Zeisel_lvl5/hl2020.gsa.out"
+expdataset <- "Zeisel_lvl5"
+trait <- "hl2020"
+outpath <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/04Output/"
+outname_df <- paste(outpath, expdataset, "_", trait, "_results_dataframe.tsv", sep="")
+outname_graph <- paste(outpath, expdataset,"_",  trait, "_results_graph.pdf", sep="")
+
+e <- myfun.data(inpath_ldsc, inpath_magma, trait, outname_df)
+p <- myfun.plot(e, expdataset)[[2]]
+ggsave(p,file=outname_graph)
+p
+
+```
+  
+## HCL  
+```{r}
+inpath_ldsc <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03pLDSC/HCL/tissue_pvalues.txt"
+inpath_magma <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03MAGMA/HCL/hl2020.gsa.out"
+expdataset <- "HCL"
+trait <- "hl2020"
+outpath <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/04Output/"
+outname_df <- paste(outpath, expdataset, "_", trait, "_results_dataframe.tsv", sep="")
+outname_graph <- paste(outpath, expdataset,"_",  trait, "_results_graph.pdf", sep="")
+
+e <- myfun.data(inpath_ldsc, inpath_magma, trait, outname_df)
+p <- myfun.plot(e, expdataset)[[2]]
+ggsave(p,file=outname_graph)
+p
+
+```
+  
+Plot only significant bars:  
+```{r}
+f <- myfun.plot(e, expdataset)[[1]] %>% filter(Significant!="None")
+p_xlab <- paste("Cell types in ", expdataset, " dataset", sep="")
+p1 <- ggplot(f,aes(Tissue,minuslog10P_mean,fill=Significant)) + 
+  geom_bar(stat="identity") + coord_flip() + facet_wrap(~Trait) + 
+  theme_bw() + geom_hline(yintercept =-log10(0.05/nrow(f))) + xlab("") + 
+  ylab(expression('mean -log'[10]*'(pvalue)')) + xlab(p_xlab) + 
+  scale_fill_manual(values=c("#E69F00", "#0072B2", "#56B4E9"))
+p1
+outname_graph2 <- paste(outpath, expdataset,"_",  trait, "_results_graph_onlySignificant.pdf", sep="")
+#ggsave(p1,file=outname_graph2)
+```
+  
+## ear_snRNAseq  
+```{r}
+inpath_ldsc <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03pLDSC/ear_snRNAseq/tissue_pvalues.txt"
+inpath_magma <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03MAGMA/ear_snRNAseq/hl2020.gsa.out"
+expdataset <- "ear_snRNAseq"
+trait <- "hl2020"
+outpath <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/04Output/"
+outname_df <- paste(outpath, expdataset, "_", trait, "_results_dataframe.tsv", sep="")
+outname_graph <- paste(outpath, expdataset,"_",  trait, "_results_graph.pdf", sep="")
+
+e <- myfun.data(inpath_ldsc, inpath_magma, trait, outname_df)
+p <- myfun.plot(e, expdataset)[[2]]
+ggsave(p,file=outname_graph)
+p
+
+```
+  
+```{r}
+inpath_magma <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03MAGMA/ear_snRNAseq/hl2020.gsa.out"
+inpath_ldsc <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03pLDSC/ear_snRNAseq/tissue_pvalues.txt"
+plot_out <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/04Output/"
+p1 <- plot.magma.ldsc(inpath_magma, inpath_ldsc, plot_out, "ear_snRNAseq")
+p1
+```
+  
+```{r}
+inpath_magma <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03MAGMA/ear_snRNAseq/hl2020.gsa.out"
+inpath_ldsc <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/03pLDSC/ear_snRNAseq_35up_10down/tissue_pvalues.txt"
+plot_out <- "/Users/yaoshu/Proj/_Other/Hearing_loss2020/results/04Output/"
+p1 <- plot.magma.ldsc(inpath_magma, inpath_ldsc)
+p1
+outfile <- paste(plot_out,"ear_snRNAseq_35up_10down","_p1.MAGMA_LDSC.pdf", sep="")
+ggsave(p1, file=outfile,
+         width=6, height=6)
+```
