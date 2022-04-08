@@ -1,0 +1,28 @@
+#################################################################################################################
+##### EasyQC-script to perform study-level and meta-level QC on imputed 1000G data
+##### EasyQC version: 9.0
+##### Programmer: Thomas Winkler, 2014-09-22
+##### Contact: thomas.winkler@klinik.uni-regensburg.de
+#################################################################################################################
+
+module load R_packages/3.6.1
+
+
+EASYIN	--fileIn /home/nattrp/nattrp-sens2017552/6-Rscripts/EasyQC/CLEAN.GWAS_metal_result_HL_Nov18_NT1.TBL.gz
+#################################################################################################################
+## EASYQC Scripting interface:
+START EASYQC
+
+## Extract top SNPs
+CRITERION	--rcdCrit PVAL<=5e-8
+			--strCritName numSNP_gws
+
+GETCOLS --acolOut CHR;POS;EFFECT_ALLELE;OTHER_ALLELE;BETA;SE;PVAL;N
+
+WRITE	--strPrefix FUMA. 
+		--strMissing NA 
+		--strMode gz
+
+STOP EASYQC
+#################################################################################################################
+#################################################################################################################
